@@ -1,0 +1,205 @@
+{
+  "manifest_version": 1,
+  "generated_at": "2026-09-11T20:10:58.170880+00:00",
+  "selected_model": {
+    "key": "mlp",
+    "label": "MLP (neural network)",
+    "variant": "base",
+    "model_type": "keras_sequential_mlp",
+    "framework": "TensorFlow 2.14 (Keras)",
+    "model_version": "2026-09-11T19:36:37.027194+00:00",
+    "architecture": {
+      "input_features": 20,
+      "hidden_units": [
+        64,
+        256,
+        256,
+        64
+      ],
+      "activation": "relu",
+      "dropout_rate": 0.25,
+      "output": {
+        "units": 2,
+        "activation": "softmax"
+      },
+      "parameters": 100354
+    }
+  },
+  "artifacts": {
+    "directory": "..\\backend\\app\\ml\\models",
+    "model_file": "model_mlp.h5",
+    "model_sha256": "c4d3a1d01bf5818df0063e277344d1ed064a43971ef9bcc851b7fe951c44ce18",
+    "model_bytes": 1255216,
+    "scaler_file": "scaler_mlp.pkl",
+    "scaler_sha256": "0abe867761b07bf5a1bc32722ace7101583c799fce71f9b2bedc02251017f45d",
+    "load_hint": "tf.keras.models.load_model(model_file, compile=False); pickle.load(scaler_file)"
+  },
+  "input": {
+    "dimension": 20,
+    "feature_order": [
+      "meanfreq",
+      "sd",
+      "median",
+      "Q25",
+      "Q75",
+      "IQR",
+      "skew",
+      "kurt",
+      "sp.ent",
+      "sfm",
+      "mode",
+      "centroid",
+      "meanfun",
+      "minfun",
+      "maxfun",
+      "meandom",
+      "mindom",
+      "maxdom",
+      "dfrange",
+      "modindx"
+    ],
+    "dtype": "float32 after scaling",
+    "preprocessing": {
+      "scaler": "StandardScaler fitted on train.csv only (apply scaler.transform before the model)",
+      "feature_extractor": {
+        "package": "voice_features",
+        "version": "0.1.0",
+        "sample_rate": 16000,
+        "spec": "docs/acoustic_features.md"
+      }
+    }
+  },
+  "output": {
+    "type": "softmax probabilities",
+    "class_mapping": {
+      "0": "male",
+      "1": "female"
+    },
+    "one_hot": {
+      "male": [
+        1,
+        0
+      ],
+      "female": [
+        0,
+        1
+      ]
+    },
+    "decision": "argmax over the two probabilities"
+  },
+  "benchmark_metrics": {
+    "feature_space": "historical voice.csv (R-extracted features), see docs/dataset_provenance.md",
+    "data_dir": "data\\processed\\voice_csv",
+    "validation": {
+      "n_samples": 475,
+      "accuracy": 0.9810526315789474,
+      "precision_macro": 0.9810569797539268,
+      "recall_macro": 0.9810569797539268,
+      "f1_macro": 0.9810526315789474,
+      "roc_auc": 0.9972166081622522
+    },
+    "test": {
+      "n_samples": 476,
+      "accuracy": 0.9810924369747899,
+      "precision_macro": 0.9811688884965127,
+      "recall_macro": 0.98109243697479,
+      "f1_macro": 0.9810916859030662,
+      "roc_auc": 0.9976873102182049
+    },
+    "test_confusion_matrix": {
+      "labels": [
+        "male",
+        "female"
+      ],
+      "rows": "true",
+      "cols": "predicted",
+      "matrix": [
+        [
+          235,
+          3
+        ],
+        [
+          6,
+          232
+        ]
+      ]
+    },
+    "inference": {
+      "single_call_mean_ms": 10.464589600000181,
+      "batch_1000_ms": 237.53699999360833,
+      "memory_footprint_mb": 232.875,
+      "load_seconds": 6.091520300004049
+    }
+  },
+  "validity": {
+    "benchmark_validated_on_voice_csv": true,
+    "live_audio_end_to_end_validated": false,
+    "note": "Accuracy on live recordings through the Python feature extractor has not been measured (no labelled corpus)."
+  },
+  "selection": {
+    "policy": {
+      "accuracy_criterion": "validation accuracy (val.csv) + 5-fold CV on train where available",
+      "tie_band_pp": 1.0,
+      "tie_breakers": [
+        "neural-network objective",
+        "single-call latency (< 1 ms treated as equal)",
+        "memory footprint (< 50 MB treated as equal)",
+        "validation ROC-AUC, then validation F1",
+        "operational complexity"
+      ],
+      "test_set_used_for_selection": false
+    },
+    "tied_candidates": [
+      "mlp",
+      "gradient_boosting_tuned",
+      "gradient_boosting",
+      "svm",
+      "svm_tuned",
+      "decision_tree_tuned",
+      "random_forest_tuned",
+      "random_forest"
+    ],
+    "selected": "mlp",
+    "engineering_alternative": "gradient_boosting_tuned",
+    "edge_alternative": "svm_tuned",
+    "backup": "gradient_boosting",
+    "reasoning": [
+      "Validation accuracy (val.csv, n=475) of the best candidate is 0.9874; 8 of 9 candidates lie within the 1.0 pp tie band: MLP (neural network) (0.9811), Gradient Boosting [tuned: {'model__learning_rate': 0.2}] (0.9853), Gradient Boosting (0.9874), SVM (RBF) (0.9853), SVM (RBF) [tuned: {'model__C': 1}] (0.9853), Decision Tree (baseline) [tuned: {'model__max_depth': 5}] (0.9832), Random Forest [tuned: {'model__n_estimators': 200}] (0.9853), Random Forest (0.9853).",
+      "Because the accuracy criterion does not separate these candidates, the tie-breakers apply: (a) the project's stated objective is a neural-network classifier, so the MLP is preferred when tied; (b) single-call latency (below 1 ms counts as equal); (c) memory footprint (below 50 MB counts as equal); (d) validation ROC-AUC and F1; (e) operational complexity.",
+      "Selected: MLP (neural network). Note: judged on engineering criteria alone (latency 0.29 ms, footprint 10 MB, validation ROC-AUC 0.9995) the pick would be Gradient Boosting [tuned: {'model__learning_rate': 0.2}].",
+      "Test-set metrics were not used for this decision; they are reported below for final evaluation only."
+    ]
+  },
+  "alternatives": {
+    "svm_tuned": {
+      "label": "SVM (RBF) [tuned: {'model__C': 1}]",
+      "model_path": "models\\sklearn\\svm_tuned_model.pkl",
+      "test_accuracy": 0.9810924369747899,
+      "single_call_mean_ms": 0.16566830000374466,
+      "memory_footprint_mb": 2.5703125
+    },
+    "gradient_boosting": {
+      "label": "Gradient Boosting",
+      "model_path": "models\\sklearn\\gradient_boosting_model.pkl",
+      "test_accuracy": 0.9810924369747899,
+      "single_call_mean_ms": 0.2819549999985611,
+      "memory_footprint_mb": 11.4375
+    },
+    "gradient_boosting_tuned": {
+      "label": "Gradient Boosting [tuned: {'model__learning_rate': 0.2}]",
+      "model_path": "models\\sklearn\\gradient_boosting_tuned_model.pkl",
+      "test_accuracy": 0.9852941176470589,
+      "single_call_mean_ms": 0.2940976999962004,
+      "memory_footprint_mb": 10.4609375
+    }
+  },
+  "git": {
+    "commit": "no commits yet",
+    "branch": "unknown",
+    "dirty": true
+  },
+  "environment": {
+    "python": "3.11.16",
+    "platform": "Windows-10-10.0.26200-SP0"
+  }
+}

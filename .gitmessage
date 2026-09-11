@@ -1,0 +1,21 @@
+
+
+# ---------------------------------------------------------------------------
+# Conventional Commits  (https://www.conventionalcommits.org)
+#
+#   <type>(<scope>): <short summary>          <- 72 chars max, imperative mood
+#   <blank line>
+#   <body>                                     <- what and why, not how
+#   <blank line>
+#   <footer>                                   <- BREAKING CHANGE:, Closes #12
+#
+# type:   feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert
+# scope:  backend | frontend | ml | infra | docs | repo   (optional)
+#
+# Examples:
+#   feat(ml): add python implementation of specan acoustic features
+#   fix(backend): reject uploads larger than 10 MB
+#   docs(repo): document local setup for windows
+#
+# Lines starting with '#' are ignored.
+# ---------------------------------------------------------------------------

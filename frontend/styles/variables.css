@@ -1,0 +1,45 @@
+/* Design tokens shared by Tailwind (tailwind.config.js) and plain CSS. */
+
+:root {
+  /* Surfaces */
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+
+  /* Gender palette */
+  --color-male: #2563eb;
+  --color-male-soft: #dbeafe;
+  --color-female: #db2777;
+  --color-female-soft: #fce7f3;
+
+  /* Brand accent */
+  --color-brand: #7c3aed;
+  --color-brand-soft: #ede9fe;
+
+  /* Status */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+
+  /* Shape and motion */
+  --radius: 0.5rem;
+  --transition-fast: 150ms ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+    --card: #141414;
+    --muted: #1f1f23;
+    --muted-foreground: #a1a1aa;
+    --border: #27272a;
+
+    --color-male-soft: #1e3a8a;
+    --color-female-soft: #831843;
+    --color-brand-soft: #4c1d95;
+  }
+}

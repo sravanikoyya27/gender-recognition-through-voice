@@ -1,0 +1,25 @@
+[project]
+name = "voice-gender-backend"
+version = "0.1.0"
+description = "FastAPI backend for Gender Recognition Through Voice"
+requires-python = ">=3.10,<3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-ra -q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["B008"]  # FastAPI uses function calls (Depends/File) in argument defaults
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
