@@ -65,9 +65,17 @@ The API starts even when PostgreSQL or the trained model is missing; `/health` t
 ## Tests and lint
 
 ```bash
-pytest
+pytest                                   # from backend/
+pytest --cov=app --cov-report=term-missing
 ruff check . && ruff format --check .
 ```
+
+From the repository root the same suite runs as `pytest backend/tests/` and `pytest --cov=app backend/tests/` (use the backend virtualenv's interpreter).
+
+- The API tests run against the FastAPI app with the database dependency redirected to an in-memory SQLite database; PostgreSQL is not required (only `test_migrations.py` needs it and skips otherwise). The application lifespan runs once per session, so the deployed model artifacts in `app/ml/models/` are loaded exactly as in production.
+- Shared fixtures (`tests/conftest.py`): `client` / `test_client`, `test_engine`, `db_session`, `test_user` (registered through the real endpoint), `valid_token`, `auth_headers_for_user`, `test_audio_file`.
+- `tests/fixtures/sample_audio.wav` is the committed 3-second reference recording (16 kHz, mono, 16-bit PCM; synthetic voiced signal with a 120 Hz fundamental). Regenerate it with `python tests/fixtures/generate_sample_audio.py`; `test_sample_audio_fixture` checks the file matches the generator.
+- `tests/test_predictions.py` holds the Phase 5 specification suite (feature extraction, model inference, prediction endpoint, authentication, analytics, database, performance budgets: inference < 500 ms, end-to-end prediction < 2 s, history/statistics queries < 100 ms). Coverage is configured in `pyproject.toml`; the suite currently measures about 91 % of `app/` (target > 80 %).
 
 ## Docker environment (local development)
 

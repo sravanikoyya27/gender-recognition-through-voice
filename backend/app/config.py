@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     MODEL_COMPARISON_REPORT_PATH: Path = (
         BACKEND_DIR.parent / "ml_models" / "models" / "comparison" / "comparison_report.json"
     )
+    # Phase 2C feature importances and Phase 2B training statistics (optional, for the results UI).
+    FEATURE_IMPORTANCE_PATH: Path = (
+        BACKEND_DIR.parent / "ml_models" / "models" / "sklearn" / "feature_importance.json"
+    )
+    TRAINING_METRICS_PATH: Path = BACKEND_DIR.parent / "ml_models" / "models" / "metrics_mlp.json"
 
     # --- Uploads / predictions ---
     MAX_UPLOAD_SIZE_MB: int = 10

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { useAnalyticsStore } from "@/store/analyticsStore";
 import { useAuthStore } from "@/store/authStore";
 
 /**
@@ -14,6 +15,7 @@ import { useAuthStore } from "@/store/authStore";
 export default function StoreHydration() {
   useEffect(() => {
     void useAuthStore.persist.rehydrate();
+    void useAnalyticsStore.persist.rehydrate();
   }, []);
   return null;
 }

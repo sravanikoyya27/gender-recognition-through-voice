@@ -73,9 +73,10 @@ cd ../ml_models
 pip install -r requirements.txt
 python train.py
 
-# 5. Everything via Docker
+# 5. Everything via Docker (postgres, redis, backend, frontend; see infrastructure/README.md)
 cd ../infrastructure
-docker compose up --build
+cp .env.example .env            # set POSTGRES_PASSWORD and JWT_SECRET_KEY
+docker compose up -d --build
 ```
 
 Optional developer tooling:

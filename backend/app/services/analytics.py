@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
+from app.ml.features import FEATURE_NAMES
 from app.models.database import ModelMetrics, Prediction
 from app.services.storage import delete_from_s3, is_s3_key
 from app.utils.cache import get_cache, statistics_key
@@ -394,5 +395,62 @@ def model_performance(db: Session) -> dict[str, Any]:
         "note": (
             "Metrics were measured on the historical voice.csv test split; "
             "live-audio accuracy is unvalidated."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Feature importance and reference statistics (for the results UI)
+# ---------------------------------------------------------------------------
+
+IMPORTANCE_PREFERENCE = ("random_forest", "gradient_boosting", "svm", "decision_tree")
+
+
+def model_features(importance_path: Path | None = None, metrics_path: Path | None = None) -> dict[str, Any]:
+    """Measured feature importances (Phase 2C) and training-set feature statistics (Phase 2B).
+
+    Both are optional artifacts; missing files yield ``None`` so the UI can degrade.
+    The MLP has no native importances, so the Random Forest's impurity importances
+    (or the next available model's) are reported with their provenance.
+    """
+    settings = get_settings()
+    importance_path = importance_path or settings.FEATURE_IMPORTANCE_PATH
+    metrics_path = metrics_path or settings.TRAINING_METRICS_PATH
+
+    importance: dict[str, Any] | None = None
+    if importance_path.exists():
+        data = json.loads(importance_path.read_text())
+        key = next((k for k in IMPORTANCE_PREFERENCE if k in data), next(iter(data), None))
+        if key:
+            values = {
+                name: float(v) for name, v in data[key].get("importance", {}).items() if name in FEATURE_NAMES
+            }
+            importance = {
+                "model_key": MODEL_DISPLAY.get(key, (key, key))[1],
+                "label": MODEL_DISPLAY.get(key, (key, key))[0],
+                "method": f"{data[key].get('method', 'feature importance')} (Phase 2C, voice.csv benchmark)",
+                "values": dict(sorted(values.items(), key=lambda kv: kv[1], reverse=True)),
+            }
+
+    reference: dict[str, Any] | None = None
+    if metrics_path.exists():
+        stats = json.loads(metrics_path.read_text()).get("data", {}).get("statistics", {})
+        mean = stats.get("train_feature_mean")
+        std = stats.get("train_feature_std")
+        if mean and std:
+            reference = {
+                "source": "train.csv feature mean/std (Phase 2B, voice.csv benchmark)",
+                "mean": {name: float(mean[name]) for name in FEATURE_NAMES if name in mean},
+                "std": {name: float(std[name]) for name in FEATURE_NAMES if name in std},
+            }
+
+    return {
+        "feature_order": list(FEATURE_NAMES),
+        "importance": importance,
+        "reference": reference,
+        "note": (
+            "Importances come from a scikit-learn model trained on the same features; the production "
+            "MLP has no native importances. Reference statistics describe the historical voice.csv "
+            "training split."
         ),
     }

@@ -1,0 +1,107 @@
+# Gender Recognition Through Voice: full local stack.
+#
+#   cd infrastructure
+#   cp .env.example .env            # then edit the values
+#   docker compose up -d            # development: docker-compose.override.yml is applied automatically
+#   docker compose -f docker-compose.yml up -d   # production-like: no source mounts, no --reload
+#
+# Services talk to each other over the "voice-app" network by service name
+# (postgres, redis, backend, frontend). The browser reaches the API through the
+# published port, i.e. NEXT_PUBLIC_API_URL=http://localhost:8000.
+
+version: "3.9"
+
+name: voice-gender
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: voice-gender-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-voicedb}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice-app
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: voice-gender-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - voice-app
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.backend
+    # Locally the image is built from source; in deployment BACKEND_IMAGE (in .env) points at
+    # an ECR tag pulled by deploy.sh, and `up -d` uses it without building.
+    image: ${BACKEND_IMAGE:-voice-gender-backend}
+    container_name: voice-gender-backend
+    env_file:
+      - .env
+    environment:
+      # Inside the network the database and cache are reached by service name.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-voicedb}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    networks:
+      - voice-app
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: infrastructure/Dockerfile.frontend
+      args:
+        # Baked into the browser bundle at build time (see Dockerfile.frontend).
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_APP_NAME: ${NEXT_PUBLIC_APP_NAME:-Gender Recognition Through Voice}
+    image: ${FRONTEND_IMAGE:-voice-gender-frontend}
+    container_name: voice-gender-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Server-side code (if any) can reach the API directly on the network.
+      API_INTERNAL_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - voice-app
+    restart: unless-stopped
+
+volumes:
+  # Persists the PostgreSQL cluster across `docker compose down` (removed by `down -v`).
+  postgres_data:
+
+networks:
+  voice-app:
+    driver: bridge

@@ -1,0 +1,16 @@
+# Development overrides. Docker Compose merges this file automatically when you run
+# `docker compose up` from this directory. It mounts the backend source into the container
+# and enables uvicorn's auto-reload, so edits under backend/app take effect without a rebuild.
+#
+# Production: skip this file with `docker compose -f docker-compose.yml up -d`
+# (no source mounts, no reload; the image contains the code).
+
+services:
+  backend:
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/alembic:/app/alembic
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]

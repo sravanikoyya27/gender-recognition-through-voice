@@ -144,6 +144,8 @@ $RECYCLE.BIN/
 # Docker / infrastructure
 # ---------------------------------------------------------------------------
 docker-compose.override.yml
+# The development override for the compose stack is versioned (no secrets, only source mounts).
+!infrastructure/docker-compose.override.yml
 *.tfstate
 *.tfstate.*
 .terraform/

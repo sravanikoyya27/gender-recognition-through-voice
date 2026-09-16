@@ -108,10 +108,16 @@ module.exports = {
           from: { opacity: "0", transform: "translateY(4px)" },
           to: { opacity: "1", transform: "translateY(0)" },
         },
+        "scale-in": {
+          from: { opacity: "0", transform: "scale(0.85)" },
+          to: { opacity: "1", transform: "scale(1)" },
+        },
       },
       animation: {
         "pulse-ring": "pulse-ring 1.5s ease-out infinite",
         "fade-in": "fade-in 200ms ease-out",
+        "fade-in-slow": "fade-in 500ms ease-out both",
+        "scale-in": "scale-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both",
       },
     },
   },

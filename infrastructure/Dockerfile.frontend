@@ -1,0 +1,53 @@
+# Next.js frontend image (multi-stage). Build context is the repository root:
+#
+#   docker build -f infrastructure/Dockerfile.frontend \
+#     --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 -t voice-gender-frontend .
+#
+# NEXT_PUBLIC_* variables are inlined into the browser bundle by `next build`, so the
+# backend URL the browser should call must be supplied at BUILD time (build arg), not
+# only at run time.
+
+# --- Stage 1: build -----------------------------------------------------------
+FROM node:18-alpine AS build
+
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Dependencies first (cached unless package.json / package-lock.json change).
+# --legacy-peer-deps: react-mic 12.4.6 declares a React 16 peer (see frontend/README.md).
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+
+COPY frontend/ ./
+
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ARG NEXT_PUBLIC_APP_NAME="Gender Recognition Through Voice"
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_APP_NAME=$NEXT_PUBLIC_APP_NAME
+
+RUN npm run build
+
+# --- Stage 2: runtime ---------------------------------------------------------
+FROM node:18-alpine AS runtime
+
+WORKDIR /app
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# next.config.js sets `output: "standalone"`: .next/standalone holds server.js plus the
+# minimal node_modules it needs; static assets and public/ are copied next to it.
+COPY --from=build --chown=node:node /app/.next/standalone ./
+COPY --from=build --chown=node:node /app/.next/static ./.next/static
+COPY --from=build --chown=node:node /app/public ./public
+
+USER node
+EXPOSE 3000
+
+# 127.0.0.1 rather than localhost: Alpine resolves localhost to ::1 first and the server binds IPv4.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget -q --spider http://127.0.0.1:3000/ || exit 1
+
+# Equivalent of `npm run start` for a standalone build (next start does not serve standalone output).
+CMD ["node", "server.js"]

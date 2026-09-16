@@ -1,0 +1,55 @@
+# FastAPI backend image (Gender Recognition Through Voice).
+#
+# Build context is the repository root because the backend depends on the shared
+# feature-extraction package in ml_models/ (requirements.txt: `-e ../ml_models`):
+#
+#   docker build -f infrastructure/Dockerfile.backend -t voice-gender-backend .
+#
+# The image expects the deployed model artifacts in backend/app/ml/models/
+# (model_mlp.h5, scaler_mlp.pkl, model_config.json, written by ml_models/model_comparison.py).
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TF_CPP_MIN_LOG_LEVEL=2
+
+# System dependencies for audio processing (libsndfile backs soundfile/librosa) and the
+# OpenMP runtime used by TensorFlow and scikit-learn wheels.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libsndfile1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Layout inside the image mirrors the repository: /app = backend/, /ml_models = ml_models/
+WORKDIR /app
+
+# Shared feature package first (editable install target of requirements.txt)
+COPY ml_models/pyproject.toml /ml_models/pyproject.toml
+COPY ml_models/voice_features /ml_models/voice_features
+
+# Python dependencies (separate layer so code changes do not reinstall TensorFlow)
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r /app/requirements.txt
+
+# Application code, migrations and deployed model artifacts
+COPY backend/ /app/
+# Optional training reports (comparison_report.json, feature_importance.json, metrics_mlp.json)
+# used to seed model_metrics and the results view; large training artifacts are dockerignored.
+COPY ml_models/ /ml_models/
+
+# Run as an unprivileged user; logs and upload temp files stay writable.
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/logs \
+    && chown -R appuser:appuser /app /ml_models
+USER appuser
+
+EXPOSE 8000
+
+# The model is loaded at startup (tens of seconds on CPU): allow a generous start period.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD python -c "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

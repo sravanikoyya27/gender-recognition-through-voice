@@ -18,6 +18,7 @@ from app.api.auth import get_current_user
 from app.models.database import User, get_db
 from app.schemas.analytics import (
     MessageResponse,
+    ModelFeaturesResponse,
     ModelPerformanceResponse,
     PredictionDetailResponse,
     PredictionHistoryResponse,
@@ -144,3 +145,13 @@ def my_statistics(
 def models_performance(db: Session = Depends(get_db)) -> ModelPerformanceResponse:
     """Benchmark metrics of the trained models and the current production model (no authentication)."""
     return ModelPerformanceResponse(**service.model_performance(db))
+
+
+@router.get(
+    "/models/features",
+    response_model=ModelFeaturesResponse,
+    summary="Feature order, measured importances and training reference statistics (public)",
+)
+def models_features() -> ModelFeaturesResponse:
+    """Metadata the results view uses to rank, highlight and normalise the 20 acoustic features."""
+    return ModelFeaturesResponse(**service.model_features())

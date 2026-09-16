@@ -22,13 +22,16 @@ export const usePredictionStore = create<PredictionState>()((set) => ({
   error: null,
   history: [],
   setStatus: (status) => set({ status }),
-  setResult: (result) =>
+  setResult: (result) => {
+    // The API response carries no timestamp for fresh predictions; record when it arrived.
+    const stamped = result.created_at ? result : { ...result, created_at: new Date().toISOString() };
     set((state) => ({
       status: "success",
-      result,
+      result: stamped,
       error: null,
-      history: [result, ...state.history].slice(0, 50),
-    })),
+      history: [stamped, ...state.history].slice(0, 50),
+    }));
+  },
   setError: (error) => set({ status: "error", error }),
   reset: () => set({ status: "idle", result: null, error: null }),
   clearHistory: () => set({ history: [] }),

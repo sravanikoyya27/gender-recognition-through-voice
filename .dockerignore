@@ -1,0 +1,43 @@
+# Build context is the repository root (see infrastructure/docker-compose.yml).
+# Keep the context small and never bake secrets or local environments into images.
+
+.git
+.github
+.claude
+docs
+infrastructure/*.md
+README.md
+
+# Local environments and secrets
+**/.env
+**/.env.local
+**/.env.*.local
+**/.venv
+**/venv
+**/node_modules
+**/.next
+**/*.egg-info
+
+# Caches and test artefacts
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/htmlcov
+**/.coverage
+**/logs
+
+# Training-only artifacts: the API needs backend/app/ml/models (model, scaler, manifest)
+# and the small JSON reports under ml_models/models, not the raw data or training checkpoints.
+ml_models/data
+ml_models/models/checkpoints
+ml_models/models/model_mlp
+ml_models/models/model_mlp.h5
+ml_models/models/*.pkl
+ml_models/models/sklearn/*.pkl
+ml_models/models/**/*.png
+ml_models/tests
+backend/tests
+frontend/__tests__
+frontend/cypress

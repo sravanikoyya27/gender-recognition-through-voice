@@ -1,11 +1,17 @@
-import axios, { AxiosError, type AxiosInstance } from "axios";
+import axios, { AxiosError, type AxiosInstance, type AxiosProgressEvent } from "axios";
 
 import { useAuthStore } from "@/store/authStore";
 import type {
   ApiError,
   HealthResponse,
-  PredictionListResponse,
+  HistoryQuery,
+  MessageResponse,
+  ModelFeaturesResponse,
+  ModelPerformanceResponse,
+  PredictionDetail,
+  PredictionHistoryResponse,
   PredictionResponse,
+  StatisticsResponse,
 } from "@/types/api";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -36,8 +42,13 @@ api.interceptors.response.use(
   },
 );
 
+export const CANCELLED = "cancelled";
+
 /** Convert any thrown value into a predictable ApiError. */
 export function toApiError(error: unknown): ApiError {
+  if (axios.isCancel(error)) {
+    return { status: null, message: "Upload cancelled", detail: CANCELLED };
+  }
   if (axios.isAxiosError<{ detail?: unknown }>(error)) {
     const detail = error.response?.data?.detail;
     const message =
@@ -65,17 +76,69 @@ export async function getHealth(): Promise<HealthResponse> {
   return data;
 }
 
-export async function predictAudio(file: File | Blob, filename?: string): Promise<PredictionResponse> {
+export interface UploadOptions {
+  /** Progress callback (loaded/total bytes) for a progress bar. */
+  onUploadProgress?: (event: AxiosProgressEvent) => void;
+  /** Abort signal to cancel the request. */
+  signal?: AbortSignal;
+}
+
+export async function predictAudio(
+  file: File | Blob,
+  filename?: string,
+  options: UploadOptions = {},
+): Promise<PredictionResponse> {
   const form = new FormData();
-  const name = filename ?? (file instanceof File ? file.name : "recording.webm");
-  form.append("file", file, name);
+  const name = filename ?? (file instanceof File ? file.name : "recording.wav");
+  form.append("audio", file, name); // backend field name (Phase 3C); "file" is accepted as an alias
   const { data } = await api.post<PredictionResponse>(`${API_V1}/predictions`, form, {
     headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: options.onUploadProgress,
+    signal: options.signal,
+    timeout: 120_000,
   });
   return data;
 }
 
-export async function getPredictions(): Promise<PredictionListResponse> {
-  const { data } = await api.get<PredictionListResponse>(`${API_V1}/predictions`);
+/** Feature order, measured importances and training reference statistics (public, static). */
+export async function getModelFeatures(): Promise<ModelFeaturesResponse> {
+  const { data } = await api.get<ModelFeaturesResponse>(`${API_V1}/models/features`);
+  return data;
+}
+
+// --- Analytics & history (Phase 3D endpoints, authenticated) -----------------
+
+/** Paginated history of the signed-in user (limit 1-100, sort "-date" by default). */
+export async function getMyPredictions(
+  query: HistoryQuery = {},
+  signal?: AbortSignal,
+): Promise<PredictionHistoryResponse> {
+  const { data } = await api.get<PredictionHistoryResponse>(`${API_V1}/me/predictions`, {
+    params: query,
+    signal,
+  });
+  return data;
+}
+
+/** One prediction with probabilities and all stored acoustic measurements. */
+export async function getMyPrediction(id: number, signal?: AbortSignal): Promise<PredictionDetail> {
+  const { data } = await api.get<PredictionDetail>(`${API_V1}/me/predictions/${id}`, { signal });
+  return data;
+}
+
+export async function deleteMyPrediction(id: number): Promise<MessageResponse> {
+  const { data } = await api.delete<MessageResponse>(`${API_V1}/me/predictions/${id}`);
+  return data;
+}
+
+/** All-time statistics of the signed-in user (server-side cache: one hour). */
+export async function getMyStatistics(signal?: AbortSignal): Promise<StatisticsResponse> {
+  const { data } = await api.get<StatisticsResponse>(`${API_V1}/me/statistics`, { signal });
+  return data;
+}
+
+/** Benchmark metrics of the trained models (public). */
+export async function getModelPerformance(signal?: AbortSignal): Promise<ModelPerformanceResponse> {
+  const { data } = await api.get<ModelPerformanceResponse>(`${API_V1}/models/performance`, { signal });
   return data;
 }

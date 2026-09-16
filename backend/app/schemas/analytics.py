@@ -147,5 +147,27 @@ class ModelPerformanceResponse(BaseModel):
     note: str
 
 
+class FeatureImportance(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_key: str
+    label: str
+    method: str
+    values: dict[str, float] = Field(description="Importance per feature, sorted descending")
+
+
+class FeatureReference(BaseModel):
+    source: str
+    mean: dict[str, float]
+    std: dict[str, float]
+
+
+class ModelFeaturesResponse(BaseModel):
+    feature_order: list[str]
+    importance: FeatureImportance | None
+    reference: FeatureReference | None
+    note: str
+
+
 class MessageResponse(BaseModel):
     message: str
