@@ -47,8 +47,12 @@ http://localhost:8000/health.
   (`model_mlp.h5`, `scaler_mlp.pkl`, `model_config.json`). They are produced by
   `ml_models/model_comparison.py` and, apart from the manifest, are not tracked by git. Without
   them the API starts in degraded mode and predictions return 503.
-- Stop the standalone development database if it is running (`docker stop voice-gender-db`):
-  it publishes the same host port 5432 as the `postgres` service.
+- Host port 5432 can only be published by one container. If the standalone development
+  database is running (`voice-gender-db`), either stop it (`docker stop voice-gender-db`) or set
+  `POSTGRES_PORT=5433` in `.env` before `docker compose up`. A failed port binding leaves the
+  `postgres` container off the `voice-app` network, and the backend then logs
+  `Database unavailable: OperationalError` and stays unhealthy; fix it with
+  `docker compose up -d --force-recreate postgres && docker compose restart backend`.
 - `NEXT_PUBLIC_API_URL` is inlined into the browser bundle when the frontend image is built.
   After changing it run `docker compose build frontend`.
 

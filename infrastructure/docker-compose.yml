@@ -24,7 +24,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Host port for psql/GUI tools only; the backend uses the network address postgres:5432.
+      # Set POSTGRES_PORT in .env (e.g. 5433) when another PostgreSQL already owns 5432.
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
