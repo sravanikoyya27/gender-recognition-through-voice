@@ -165,6 +165,16 @@ usePredictionStore.getState().reset();
 - **Charts** (recharts, memoised, rendered lazily when scrolled into view): predictions per day, gender donut with counts and percentages, confidence histogram (90-100 / 80-90 / 70-80 / <70), and test accuracy per model with the current production model highlighted. The model chart states that the accuracies were measured on the historical voice.csv test split and that live-audio accuracy is unvalidated.
 - **Table**: Date / Gender / Confidence / Duration / Model, sortable by date, confidence and duration (the backend's sort keys), 10 rows per page, View (opens the detail modal via `?prediction=<id>`, the same link "Share" copies on the dashboard) and Delete (confirmation dialog, then `DELETE /api/v1/me/predictions/{id}`; the cards and table refresh). `?gender=male|female` (the dashboard's "Similar predictions" link) preselects the gender filter.
 
+## Authentication
+
+The auth pages use the Phase 3B endpoints through the shared client; there is no separate auth system.
+
+- **Register** (`app/(auth)/register/page.tsx`): username, email, password and password confirmation, validated client-side with the backend's rules (`lib/authValidation.ts`: username 3-50 alphanumeric, password 8-128, confirmation must match) and then `POST /api/v1/auth/register`. Conflicts (409) and backend validation messages (400) are shown inline; success redirects to `/login?registered=<username>`.
+- **Login** (`app/(auth)/login/page.tsx`): `POST /api/v1/auth/login`, the access token goes into `authStore` (persisted to localStorage), then `GET /api/v1/auth/me` fills in the user for the navigation bar. `?next=/path` (same-origin paths only) is honoured after sign-in; protected pages link to it.
+- **Requests**: the axios request interceptor adds `Authorization: Bearer <token>` to every call; a 401 response clears the session.
+- **Logout**: `useAuth().logout()` calls `POST /api/v1/auth/logout` (best effort; JWTs are stateless), clears the store and invalidates the cached analytics.
+- **Signed-out behaviour**: the dashboard shows a sign-in notice and disables the recorder and upload (predictions require a token, `PREDICTIONS_REQUIRE_AUTH`); the analytics page shows a sign-in prompt and only the public model performance chart.
+
 ## Talking to the backend
 
 `services/api.ts` builds one axios instance from `NEXT_PUBLIC_API_URL`, attaches the bearer token from `authStore`, and converts every failure into an `ApiError`. A 401 response clears the session automatically. Endpoint helpers: `getHealth()`, `predictAudio(file)`, `getModelFeatures()`, `getMyPredictions(query)`, `getMyPrediction(id)`, `deleteMyPrediction(id)`, `getMyStatistics()`, `getModelPerformance()`, plus `login()` / `register()` in `services/auth.ts`.

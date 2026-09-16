@@ -115,17 +115,31 @@ export interface MessageResponse {
   message: string;
 }
 
+/** POST /api/v1/auth/login and /refresh. */
 export interface TokenResponse {
   access_token: string;
   token_type: "bearer";
+  /** Seconds until the access token expires. */
+  expires_in: number;
+  refresh_token: string | null;
 }
 
 export type UserResponse = User;
 
+/** POST /api/v1/auth/register (backend UserRegister): all four fields are required. */
 export interface RegisterRequest {
+  /** 3-50 alphanumeric characters. */
+  username: string;
   email: string;
+  /** 8-128 characters. */
   password: string;
-  full_name?: string;
+  /** Must equal `password`. */
+  password_confirm: string;
+}
+
+export interface RegisterResponse {
+  message: string;
+  user: User;
 }
 
 export interface LoginRequest {

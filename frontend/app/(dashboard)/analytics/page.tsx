@@ -103,7 +103,7 @@ function AnalyticsContent() {
         <div className="card text-sm">
           <p>
             Predictions are stored per account.{" "}
-            <Link href="/login" className="text-brand underline-offset-4 hover:underline">
+            <Link href="/login?next=/analytics" className="text-brand underline-offset-4 hover:underline">
               Sign in
             </Link>{" "}
             to see your history and statistics.

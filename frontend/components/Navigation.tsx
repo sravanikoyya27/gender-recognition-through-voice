@@ -17,7 +17,7 @@ const links = [
 
 export default function Navigation() {
   const pathname = usePathname();
-  const { isAuthenticated, hasHydrated, logout } = useAuth();
+  const { isAuthenticated, hasHydrated, user, logout } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur">
@@ -50,10 +50,17 @@ export default function Navigation() {
 
           {hasHydrated ? (
             isAuthenticated ? (
-              <button type="button" onClick={logout} className="btn-secondary ml-2">
-                <LogOut className="h-4 w-4" aria-hidden />
-                <span className="hidden md:inline">Sign out</span>
-              </button>
+              <>
+                {user ? (
+                  <span className="ml-2 hidden text-sm text-muted-foreground lg:inline" title={user.email}>
+                    {user.username}
+                  </span>
+                ) : null}
+                <button type="button" onClick={() => void logout()} className="btn-secondary ml-2" aria-label="Sign out">
+                  <LogOut className="h-4 w-4" aria-hidden />
+                  <span className="hidden md:inline">Sign out</span>
+                </button>
+              </>
             ) : (
               <Link href="/login" className="btn-primary ml-2">
                 <LogIn className="h-4 w-4" aria-hidden />
