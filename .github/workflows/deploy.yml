@@ -1,195 +1,120 @@
-# CI/CD for Gender Recognition Through Voice.
+# Release: build and publish the Docker images to ECR and (optionally) deploy to EC2.
 #
-#   pull_request -> main : backend tests (+ coverage gate), frontend lint/type-check/build
-#   push         -> main : the same tests, then build + push images to ECR, then deploy to EC2
-#   workflow_dispatch    : manual run; with `image_tag` set it redeploys an existing ECR tag
-#                          (manual rollback) without re-testing or rebuilding
+# MANUAL ONLY (workflow_dispatch). Nothing here runs on push or pull request; automatic testing
+# lives in ci.yml. Two modes, chosen by the inputs:
+#
+#   image_tag empty   -> run the CI tests (reused from ci.yml), build both images for this commit,
+#                        push them to ECR tagged with the commit SHA (and `latest`), then deploy
+#                        only if `deploy` is true.
+#   image_tag = <sha> -> ROLLBACK / REDEPLOY: no tests, no build, no push. The existing ECR
+#                        images with that tag are deployed, only if `deploy` is true.
+#
+# `deploy` defaults to false, so a release never reaches EC2 unless explicitly requested. The
+# deploy job also runs in the `production` environment: add required reviewers to that
+# environment (Settings -> Environments) for a second, approval-based gate.
 #
 # Secrets (GitHub Settings -> Secrets and variables -> Actions):
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION   push to ECR / login on the instance
 #   EC2_HOST, EC2_USER, EC2_PRIVATE_KEY                    SSH target (DEPLOY_USER overrides EC2_USER)
 #   DEPLOY_USER                                            optional unix user for the deployment
 #   SLACK_WEBHOOK_URL                                      optional incoming-webhook for notifications
-#   CODECOV_TOKEN                                          optional coverage upload
 # Variables (same page, "Variables" tab):
 #   NEXT_PUBLIC_API_URL   public API URL baked into the frontend image (e.g. https://api.example.com)
 #   DEPLOY_PATH           directory on the instance holding docker-compose.yml and .env (default below)
 #   ECR_BACKEND_REPO / ECR_FRONTEND_REPO   repository names (default voice-backend / voice-frontend)
 
-name: CI/CD
+name: Release
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Existing ECR image tag (commit SHA) to deploy. Leave empty for a normal run."
+        description: "Rollback/redeploy: existing ECR image tag (commit SHA). Leave EMPTY to build and push this commit."
         required: false
         default: ""
+      deploy:
+        description: "Deploy to EC2 (after the build, or the given image_tag). Off by default."
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false # never cancel a deployment half-way
+  group: release
+  cancel-in-progress: false # never cancel a release or deployment half-way
 
 env:
-  PYTHON_VERSION: "3.11"
-  NODE_VERSION: "18"
   ECR_BACKEND_REPO: ${{ vars.ECR_BACKEND_REPO || 'voice-backend' }}
   ECR_FRONTEND_REPO: ${{ vars.ECR_FRONTEND_REPO || 'voice-frontend' }}
 
 jobs:
   # ---------------------------------------------------------------------------
-  # a) Backend tests (all branches)
+  # 0) Preflight: are the deployment secrets configured? (names only, never values)
   # ---------------------------------------------------------------------------
-  backend-tests:
-    name: Backend tests
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.image_tag == '' }}
+  preflight:
+    name: Preflight (secrets and inputs)
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 5
     env:
-      # Lets test_migrations.py run against a real PostgreSQL (it skips when unreachable).
-      DATABASE_URL: postgresql+psycopg2://voice:voice@localhost:5432/voice_gender
-      JWT_SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
-      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-    services:
-      postgres:
-        image: postgres:15-alpine
-        env:
-          POSTGRES_USER: voice
-          POSTGRES_PASSWORD: voice
-          POSTGRES_DB: voice_gender
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U voice -d voice_gender"
-          --health-interval 10s --health-timeout 5s --health-retries 5
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+      SSH_USER: ${{ secrets.DEPLOY_USER || secrets.EC2_USER }}
+      IMAGE_TAG_INPUT: ${{ inputs.image_tag }}
+      DEPLOY_INPUT: ${{ inputs.deploy }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: |
-            backend/requirements.txt
-            ml_models/requirements.txt
-
-      - name: Install system dependencies (libsndfile for audio decoding)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsndfile1
-
-      - name: Install backend dependencies
-        working-directory: backend
-        run: pip install -r requirements.txt # includes the shared feature package (-e ../ml_models)
-
-      # The trained model, scaler and manifest are not tracked by git (see .gitignore). They are
-      # restored from the Actions cache and otherwise regenerated with the real Phase 2 pipeline
-      # (voice.csv download -> MLP + scikit-learn training -> comparison -> deployment copy).
-      - name: Restore model artifacts
-        id: model-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            backend/app/ml/models
-            ml_models/models
-            ml_models/data/processed/voice_csv
-          key: model-artifacts-${{ runner.os }}-${{ hashFiles('ml_models/*.py', 'ml_models/voice_features/**', 'ml_models/requirements.txt') }}
-
-      - name: Train and deploy model artifacts (cache miss)
-        if: steps.model-cache.outputs.cache-hit != 'true'
-        working-directory: ml_models
+      - name: Validate inputs
         run: |
-          pip install -r requirements.txt
-          python prepare_voice_csv.py
-          python train_neural_network.py --data-dir data/processed/voice_csv --output models
-          python train_sklearn_models.py --data-dir data/processed/voice_csv --output models/sklearn
-          python model_comparison.py --models-dir models --data-dir data/processed/voice_csv \
-            --output models/comparison --deploy-dir ../backend/app/ml/models
+          if [ -n "$IMAGE_TAG_INPUT" ] && ! printf '%s' "$IMAGE_TAG_INPUT" | grep -Eq '^[0-9a-f]{7,40}$'; then
+            echo "::error::image_tag must be a commit SHA (7-40 hex characters) of an existing ECR image."
+            exit 1
+          fi
+          if [ -n "$IMAGE_TAG_INPUT" ]; then
+            echo "Mode: ROLLBACK / REDEPLOY of existing tag $IMAGE_TAG_INPUT (no build, no push)"
+          else
+            echo "Mode: BUILD AND PUSH commit ${GITHUB_SHA} (tests run first)"
+          fi
+          echo "Deploy to EC2: $DEPLOY_INPUT"
 
-      - name: Run pytest with coverage (fails below 80 %)
+      - name: Check required secrets are present (values are never printed)
         run: |
-          pytest backend/tests/ --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=80
-
-      - name: Upload coverage to Codecov (optional)
-        if: env.CODECOV_TOKEN != ''
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ env.CODECOV_TOKEN }}
-          files: coverage.xml
-          flags: backend
-          fail_ci_if_error: false
-
-      - name: Share model artifacts with the image build
-        uses: actions/upload-artifact@v4
-        with:
-          name: model-artifacts
-          retention-days: 7
-          if-no-files-found: error
-          path: |
-            backend/app/ml/models/model_mlp.h5
-            backend/app/ml/models/scaler_mlp.pkl
-            backend/app/ml/models/model_config.json
-            ml_models/models/metrics_mlp.json
-            ml_models/models/comparison/comparison_report.json
-            ml_models/models/sklearn/feature_importance.json
+          missing=""
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+            [ -z "${!name}" ] && missing="$missing $name"
+          done
+          if [ "$DEPLOY_INPUT" = "true" ]; then
+            for name in EC2_HOST EC2_PRIVATE_KEY; do
+              [ -z "${!name}" ] && missing="$missing $name"
+            done
+            [ -z "$SSH_USER" ] && missing="$missing EC2_USER(or DEPLOY_USER)"
+          fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them under Settings -> Secrets and variables -> Actions, then re-run."
+            exit 1
+          fi
+          echo "All required secrets are configured."
 
   # ---------------------------------------------------------------------------
-  # b) Frontend checks (all branches)
+  # 1) Tests (reused from ci.yml, same run -> artifacts shared). Skipped for rollbacks.
   # ---------------------------------------------------------------------------
-  frontend-tests:
-    name: Frontend tests
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.image_tag == '' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: frontend
-    env:
-      NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8000' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Clean install
-        run: npm ci --legacy-peer-deps # react-mic 12.4.6 declares a React 16 peer
-
-      - name: ESLint
-        run: npm run lint
-
-      - name: Strict TypeScript
-        run: npm run type-check
-
-      - name: Production build
-        run: npm run build
-
-      # No frontend unit-test runner is configured yet (frontend/__tests__ is empty);
-      # --if-present keeps this honest instead of faking a passing "test" script.
-      - name: Unit tests (when a test script exists)
-        run: npm test --if-present
+  tests:
+    name: Tests
+    needs: preflight
+    if: ${{ inputs.image_tag == '' }}
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
 
   # ---------------------------------------------------------------------------
-  # c) Build and push Docker images (main branch only)
+  # 2) Build and push images for this commit. Never runs when redeploying an existing tag.
   # ---------------------------------------------------------------------------
   build-and-push:
     name: Build and push images
-    needs: [backend-tests, frontend-tests]
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.image_tag == '') }}
+    needs: [preflight, tests]
+    if: ${{ inputs.image_tag == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     outputs:
-      registry: ${{ steps.ecr.outputs.registry }}
       image_tag: ${{ github.sha }}
     steps:
       - name: Checkout
@@ -200,6 +125,11 @@ jobs:
         with:
           name: model-artifacts
           path: .
+
+      - name: Verify model artifacts
+        run: |
+          ls -l backend/app/ml/models/model_mlp.h5 backend/app/ml/models/scaler_mlp.pkl \
+            backend/app/ml/models/model_config.json ml_models/models/comparison/comparison_report.json
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -242,12 +172,20 @@ jobs:
           cache-to: type=gha,scope=frontend,mode=max
 
   # ---------------------------------------------------------------------------
-  # d) Deploy to EC2 (main branch only, after a successful build; or manual rollback)
+  # 3) Deploy to EC2: only when `deploy` is true, after a successful build or for an existing tag.
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to EC2
-    needs: [build-and-push]
-    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.build-and-push.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.image_tag != '')) }}
+    needs: [preflight, tests, build-and-push]
+    # always() lets this job evaluate when tests/build were skipped (rollback mode); the
+    # conditions then require preflight to have passed and either a fresh successful build
+    # or an explicit existing image_tag.
+    if: >-
+      ${{ always()
+          && inputs.deploy == true
+          && needs.preflight.result == 'success'
+          && ((inputs.image_tag == '' && needs.build-and-push.result == 'success')
+              || inputs.image_tag != '') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
@@ -307,7 +245,7 @@ jobs:
         if: success() && env.SLACK_WEBHOOK_URL != ''
         run: |
           curl -sS -X POST -H 'Content-type: application/json' "$SLACK_WEBHOOK_URL" --data @- <<EOF
-          {"text": ":white_check_mark: Deployed *${{ github.repository }}* tag \`${IMAGE_TAG}\` to ${{ secrets.EC2_HOST }} (${{ github.event_name }} by ${{ github.actor }})\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
+          {"text": ":white_check_mark: Deployed *${{ github.repository }}* tag \`${IMAGE_TAG}\` to ${{ secrets.EC2_HOST }} (release by ${{ github.actor }})\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}
           EOF
 
       - name: Notify Slack (failure)
