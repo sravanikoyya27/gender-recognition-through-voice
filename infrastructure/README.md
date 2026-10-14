@@ -89,20 +89,54 @@ the base file, so the containers run the code baked into the images with no `--r
 
 ## CI/CD (GitHub Actions)
 
-`.github/workflows/deploy.yml` runs on pull requests to `main`, pushes to `main` and manually
-(`workflow_dispatch`).
+Two workflows, deliberately separated so that ordinary development never touches production:
 
-| Job | When | What |
-|---|---|---|
-| Backend tests | every run | Python 3.11, `pip install -r backend/requirements.txt`, PostgreSQL service for the migration tests, `pytest backend/tests/ --cov=app --cov-fail-under=80`, optional Codecov upload |
-| Frontend tests | every run | Node 18, `npm ci`, ESLint, strict `tsc`, `next build`, `npm test --if-present` |
-| Build and push images | `main` only | ECR login, build both images (repository-root context), tag `<account>.dkr.ecr.<region>.amazonaws.com/voice-backend:<commit-sha>` (and `latest`), same for `voice-frontend` |
-| Deploy to EC2 | `main` only, after a successful build | copies `docker-compose.yml` + `deploy.sh` to the instance over SSH, then runs `deploy.sh deploy <sha>` |
+| Workflow | File | Trigger | Needs secrets |
+|---|---|---|---|
+| CI | `.github/workflows/ci.yml` | every push, pull requests to `main` | no |
+| Release | `.github/workflows/deploy.yml` | manual only (`workflow_dispatch`) | yes |
 
-The model artifacts are not in git, so the test job restores them from the Actions cache
+### CI (automatic)
+
+| Job | What |
+|---|---|
+| Backend tests | Python 3.11, `pip install -r backend/requirements.txt`, PostgreSQL service for the migration tests, `pytest backend/tests/ --cov=app --cov-fail-under=80`, optional Codecov upload |
+| Frontend tests | Node 18, `npm ci`, ESLint, strict `tsc`, `next build`, `npm test --if-present` |
+
+The model artifacts are not in git, so the backend job restores them from the Actions cache
 (keyed on the `ml_models/` sources) and, on a cache miss, regenerates them with the real Phase 2
 pipeline (`prepare_voice_csv.py` → `train_neural_network.py` → `train_sklearn_models.py` →
-`model_comparison.py`). The build job downloads them as a workflow artifact.
+`model_comparison.py`). It uploads them as the `model-artifacts` workflow artifact. A red CI run
+always means a failing test, never a missing secret.
+
+### Release (manual)
+
+Actions → Release → "Run workflow". Inputs:
+
+| Input | Default | Meaning |
+|---|---|---|
+| `image_tag` | empty | Empty: test, build and push images for the chosen commit, tagged with its SHA and `latest`. A commit SHA: **rollback / redeploy** of the existing ECR images with that tag; no tests, no build, nothing is overwritten. |
+| `deploy` | `false` | Only when true does the Deploy job run. A release with the default inputs builds and publishes images but never touches EC2. |
+
+Jobs, in order:
+
+1. **Preflight**: validates the inputs and checks the required secrets exist (`AWS_ACCESS_KEY_ID`,
+   `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`; with `deploy`, also `EC2_HOST`, `EC2_PRIVATE_KEY` and
+   `EC2_USER` or `DEPLOY_USER`). It prints only the names of missing secrets, never values, and
+   stops the run before any test minutes are spent.
+2. **Tests**: the CI workflow reused through `workflow_call`. Because it runs inside the release
+   run, its `model-artifacts` upload is downloadable by the build job (same run, no cross-run
+   lookup needed). Skipped in rollback mode.
+3. **Build and push images**: ECR login, both images built from the repository-root context,
+   pushed as `<account>.dkr.ecr.<region>.amazonaws.com/voice-backend:<sha>` (+ `latest`) and the
+   same for `voice-frontend`. Skipped in rollback mode, so an existing tag can never be rebuilt
+   or overwritten by a redeploy.
+4. **Deploy to EC2**: only with `deploy: true`, after a successful build or for the given
+   `image_tag`. Copies `docker-compose.yml` + `deploy.sh` to the instance over SSH and runs
+   `deploy.sh deploy <tag>`. It runs in the `production` environment: adding **required reviewers**
+   to that environment (Settings → Environments → production) makes every deployment pause for an
+   explicit approval even after the manual trigger. Required reviewers are available for public
+   repositories on every GitHub plan (private repositories need GitHub Pro, Team or Enterprise).
 
 ### Secrets and variables
 

@@ -1,0 +1,161 @@
+# Continuous integration: backend and frontend tests.
+#
+# Runs automatically on every push and on pull requests to main. It needs no secrets, so a red
+# run always means a real test failure. The Release workflow (deploy.yml) reuses it through
+# `workflow_call`, which runs these jobs inside the release run so the model artifacts uploaded
+# here are downloadable by the release build job (same run, same artifact store).
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Backend tests (pytest + coverage gate, PostgreSQL service for the migration tests)
+  # ---------------------------------------------------------------------------
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Lets test_migrations.py run against a real PostgreSQL (it skips when unreachable).
+      DATABASE_URL: postgresql+psycopg2://voice:voice@localhost:5432/voice_gender
+      JWT_SECRET_KEY: ci-only-secret-key-not-used-anywhere-else-0123456789
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: voice
+          POSTGRES_PASSWORD: voice
+          POSTGRES_DB: voice_gender
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U voice -d voice_gender"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            ml_models/requirements.txt
+
+      - name: Install system dependencies (libsndfile for audio decoding)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsndfile1
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt # includes the shared feature package (-e ../ml_models)
+
+      # The trained model, scaler and manifest are not tracked by git (see .gitignore). They are
+      # restored from the Actions cache and otherwise regenerated with the real Phase 2 pipeline
+      # (voice.csv download -> MLP + scikit-learn training -> comparison -> deployment copy).
+      - name: Restore model artifacts
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            backend/app/ml/models
+            ml_models/models
+            ml_models/data/processed/voice_csv
+          key: model-artifacts-${{ runner.os }}-${{ hashFiles('ml_models/*.py', 'ml_models/voice_features/**', 'ml_models/requirements.txt') }}
+
+      - name: Train and deploy model artifacts (cache miss)
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        working-directory: ml_models
+        run: |
+          pip install -r requirements.txt
+          python prepare_voice_csv.py
+          python train_neural_network.py --data-dir data/processed/voice_csv --output models
+          python train_sklearn_models.py --data-dir data/processed/voice_csv --output models/sklearn
+          python model_comparison.py --models-dir models --data-dir data/processed/voice_csv \
+            --output models/comparison --deploy-dir ../backend/app/ml/models
+
+      - name: Run pytest with coverage (fails below 80 %)
+        run: |
+          pytest backend/tests/ --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage to Codecov (optional)
+        if: env.CODECOV_TOKEN != ''
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ env.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: backend
+          fail_ci_if_error: false
+
+      # Consumed by the Release workflow's image build (same run when called via workflow_call).
+      - name: Share model artifacts with the image build
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-artifacts
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            backend/app/ml/models/model_mlp.h5
+            backend/app/ml/models/scaler_mlp.pkl
+            backend/app/ml/models/model_config.json
+            ml_models/models/metrics_mlp.json
+            ml_models/models/comparison/comparison_report.json
+            ml_models/models/sklearn/feature_importance.json
+
+  # ---------------------------------------------------------------------------
+  # Frontend checks (lint, strict types, production build, unit tests when present)
+  # ---------------------------------------------------------------------------
+  frontend-tests:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://localhost:8000' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Clean install
+        run: npm ci --legacy-peer-deps # react-mic 12.4.6 declares a React 16 peer
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Strict TypeScript
+        run: npm run type-check
+
+      - name: Production build
+        run: npm run build
+
+      # No frontend unit-test runner is configured yet (frontend/__tests__ is empty);
+      # --if-present keeps this honest instead of faking a passing "test" script.
+      - name: Unit tests (when a test script exists)
+        run: npm test --if-present
