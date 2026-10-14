@@ -107,11 +107,35 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   return new Blob([buffer], { type: "audio/wav" });
 }
 
-/** Full conversion used by the recorder: any recorded blob -> 16 kHz mono WAV blob. */
-export async function blobToWav(blob: Blob): Promise<{ wav: Blob; duration: number; samples: Float32Array }> {
+/**
+ * Cut `samples` to at most `maxSeconds` of audio. Returns the same array when it already fits.
+ *
+ * The recorder stops on a timer tick at the maximum duration, so the captured take can run a
+ * few hundredths of a second over it; the backend rejects anything above its limit, so the
+ * decoded samples (not just the timer display) are trimmed before encoding.
+ */
+export function trimToMaxDuration(samples: Float32Array, sampleRate: number, maxSeconds?: number): Float32Array {
+  if (maxSeconds === undefined || !Number.isFinite(maxSeconds) || maxSeconds <= 0) return samples;
+  const maxSamples = Math.floor(maxSeconds * sampleRate);
+  return samples.length > maxSamples ? samples.subarray(0, maxSamples) : samples;
+}
+
+/** Duration in seconds of a 16-bit mono PCM WAV blob, read from its header-independent size. */
+export function wavDurationSeconds(wav: Blob, sampleRate: number): number {
+  return Math.max(0, wav.size - 44) / 2 / sampleRate;
+}
+
+/**
+ * Full conversion used by the recorder: any recorded blob -> 16 kHz mono WAV blob, trimmed to
+ * `maxSeconds` when given. `duration` is the length of the audio actually encoded.
+ */
+export async function blobToWav(
+  blob: Blob,
+  maxSeconds?: number,
+): Promise<{ wav: Blob; duration: number; samples: Float32Array }> {
   const decoded = await decodeBlob(blob);
-  const samples = await toMono16k(decoded);
-  return { wav: encodeWav(samples, TARGET_SAMPLE_RATE), duration: decoded.duration, samples };
+  const samples = trimToMaxDuration(await toMono16k(decoded), TARGET_SAMPLE_RATE, maxSeconds);
+  return { wav: encodeWav(samples, TARGET_SAMPLE_RATE), duration: samples.length / TARGET_SAMPLE_RATE, samples };
 }
 
 /** Peak envelope (0..1) with `buckets` entries for drawing a static waveform. */

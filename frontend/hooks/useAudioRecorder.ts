@@ -126,9 +126,11 @@ export function useAudioRecorder({
         return;
       }
       try {
-        const { wav, samples, duration } = await blobToWav(raw);
-        // Enforce the minimum on the audio actually captured, not on the timer:
-        // capture can start later than the start() call (device latency).
+        // Trim to the maximum on the decoded samples (the auto-stop fires on a timer tick, so the
+        // raw take can slightly exceed it and the backend enforces the limit strictly), and enforce
+        // the minimum on the audio actually captured, not on the timer: capture can start later
+        // than the start() call (device latency).
+        const { wav, samples, duration } = await blobToWav(raw, maxDuration);
         if (duration < minDuration) {
           setRecordingResult(null, null, null);
           setRecordingTime(0);
@@ -143,7 +145,7 @@ export function useAudioRecorder({
         setError(ERRORS.failed);
       }
     },
-    [minDuration, setRecordingResult, setRecordingTime, setError],
+    [minDuration, maxDuration, setRecordingResult, setRecordingTime, setError],
   );
 
   const stop = useCallback(() => {

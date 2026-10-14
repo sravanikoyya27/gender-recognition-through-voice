@@ -2,7 +2,7 @@
 
 POST /predictions        one audio file (multipart field ``audio``; ``file`` accepted too)
 POST /predictions/batch  several audio files (multipart field ``files``)
-GET  /predictions        history (implemented in a later phase)
+GET  /predictions        history in the legacy ``{items, total}`` shape (see also /me/predictions)
 
 Errors: 400 upload/audio problems, 401 not authenticated, 422 no voiced speech,
 500 model or database failure, 503 no model loaded.
@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user, get_optional_user
@@ -83,17 +84,35 @@ def persistence_session(request: Request, db: Session = Depends(get_db)) -> Sess
 # ---------------------------------------------------------------------------
 
 
+def _convert_and_decode(path: Path, ext: str) -> tuple[Path, Path | None, DecodedAudio]:
+    """CPU-bound part of staging (runs in the thread pool): optional MP3 -> WAV, then decode."""
+    converted: Path | None = None
+    if ext == ".mp3":
+        path = convert_audio_format(path, ".wav")
+        converted = path
+    return path, converted, load_and_prepare_audio(path)
+
+
 async def _stage_upload(upload: UploadFile | None) -> tuple[Path, list[Path], DecodedAudio]:
-    """Validate, save to a temp file, convert if needed and decode. Returns (path, temp files, audio)."""
+    """Validate, save to a temp file, convert if needed and decode. Returns (path, temp files, audio).
+
+    The upload is streamed on the event loop; decoding and resampling are CPU-bound and run in
+    the worker thread pool so that other requests are not stalled meanwhile.
+    """
     ext = validate_audio_file(upload)
     assert upload is not None
     temp_files: list[Path] = []
     path = await save_upload_to_temp(upload, ext)
     temp_files.append(path)
-    if ext == ".mp3":
-        path = convert_audio_format(path, ".wav")
-        temp_files.append(path)
-    audio = load_and_prepare_audio(path)
+    try:
+        path, converted, audio = await run_in_threadpool(_convert_and_decode, path, ext)
+    except BaseException:
+        # A converted file may already exist when decoding fails; make sure the caller cleans it.
+        if ext == ".mp3":
+            temp_files.append(path.with_suffix(".wav"))
+        raise
+    if converted is not None:
+        temp_files.append(converted)
     return path, temp_files, audio
 
 
@@ -127,7 +146,12 @@ async def create_prediction(
     temp_files: list[Path] = []
     try:
         path, temp_files, decoded = await _stage_upload(upload)
-        result = run_prediction(
+        # Feature extraction, TensorFlow inference, the database commit and the optional S3
+        # upload are all synchronous: run them in the thread pool so the event loop stays free.
+        # The request-scoped Session is only ever used by one thread at a time (here, then in the
+        # dependency teardown), which SQLAlchemy supports.
+        result = await run_in_threadpool(
+            run_prediction,
             decoded,
             inference,
             db=db,
@@ -189,7 +213,9 @@ async def create_batch_prediction(
                 items.append(BatchPredictionItem(filename=upload.filename, status="error", error=str(exc)))
 
         try:
-            outcomes = run_batch(staged, inference, db=db, user_id=user.id if user else None)
+            outcomes = await run_in_threadpool(
+                run_batch, staged, inference, db=db, user_id=user.id if user else None
+            )
         except (InferenceError, PersistenceError) as exc:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 

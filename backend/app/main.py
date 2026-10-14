@@ -74,6 +74,12 @@ def _log_configuration(settings: Settings) -> None:
     if masked.get("REDIS_URL") and "@" in str(masked["REDIS_URL"]):
         masked["REDIS_URL"] = "redis://***"
     logger.info("Configuration: %s", {k: str(v) for k, v in masked.items()})
+    if settings.jwt_secret_is_weak:  # production refuses to start; development only warns
+        logger.warning(
+            "JWT_SECRET_KEY is the default, an example value or too predictable; "
+            "tokens are not safe outside local development"
+        )
+    logger.info("S3 upload storage: %s", "enabled" if settings.s3_storage_enabled else "disabled (local)")
 
 
 def _verify_artifacts(settings: Settings) -> None:
@@ -256,18 +262,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     # --- system endpoints ---------------------------------------------------------
-    @app.get("/health", response_model=HealthResponse, tags=["system"], summary="Health check")
-    async def health() -> HealthResponse:
-        """Liveness/readiness probe for load balancers. No authentication.
+    @app.get(
+        "/health",
+        response_model=HealthResponse,
+        tags=["system"],
+        summary="Readiness check",
+        responses={
+            503: {
+                "description": "Degraded: database unreachable or model not loaded",
+                "model": HealthResponse,
+            }
+        },
+    )
+    async def health(response: Response) -> HealthResponse:
+        """Readiness probe for load balancers and orchestrators. No authentication.
 
-        ``status`` is ``ok`` when the database is reachable and the model is
-        loaded, otherwise ``degraded`` (the process is up but not fully functional).
+        Returns HTTP 200 with ``status: ok`` when the database is reachable and the
+        model is loaded; otherwise HTTP 503 with ``status: degraded`` and the same body,
+        so that ``database`` / ``model_loaded`` say what is missing. Use ``/health/live``
+        for a plain liveness check.
         """
         db_ok = await run_in_threadpool(check_database_connection)
         app.state.database_available = db_ok
         model_ok = app.state.inference.is_loaded
+        ready = db_ok and model_ok
+        if not ready:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(
-            status="ok" if (db_ok and model_ok) else "degraded",
+            status="ok" if ready else "degraded",
             app=settings.APP_NAME,
             version=settings.APP_VERSION,
             environment=settings.ENVIRONMENT,
@@ -275,6 +297,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             model_loaded=model_ok,
             timestamp=datetime.now(UTC),
         )
+
+    @app.get("/health/live", tags=["system"], summary="Liveness check")
+    async def health_live() -> dict[str, str]:
+        """Always 200 while the process serves requests (no dependency checks)."""
+        return {"status": "alive", "timestamp": datetime.now(UTC).isoformat()}
 
     @app.get("/", tags=["system"], summary="API information", include_in_schema=False)
     async def root() -> dict[str, str]:

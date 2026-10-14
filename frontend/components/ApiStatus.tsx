@@ -42,10 +42,15 @@ export default function ApiStatus() {
   }
 
   const { health } = state;
+  const healthy = health.status === "ok";
   return (
     <p className="inline-flex flex-wrap items-center gap-2 text-sm">
-      <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden />
-      API v{health.version} {health.status === "ok" ? "healthy" : "reachable (degraded)"}
+      {healthy ? (
+        <CheckCircle2 className="h-4 w-4 text-green-600" aria-hidden />
+      ) : (
+        <CircleDashed className="h-4 w-4 text-amber-600" aria-hidden />
+      )}
+      API v{health.version} {healthy ? "healthy" : "reachable (degraded)"}
       <span className="text-muted-foreground">
         &middot; database {health.database} &middot; model {health.model_loaded ? "loaded" : "not loaded"}
       </span>

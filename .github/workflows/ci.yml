@@ -20,7 +20,9 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  NODE_VERSION: "18"
+  # Node 22 (current LTS): `npm test` uses Node's built-in test runner with native TypeScript
+  # type stripping, which needs 22.18 or newer.
+  NODE_VERSION: "22"
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -155,7 +157,5 @@ jobs:
       - name: Production build
         run: npm run build
 
-      # No frontend unit-test runner is configured yet (frontend/__tests__ is empty);
-      # --if-present keeps this honest instead of faking a passing "test" script.
-      - name: Unit tests (when a test script exists)
-        run: npm test --if-present
+      - name: Unit tests (Node's built-in runner, frontend/__tests__)
+        run: npm test

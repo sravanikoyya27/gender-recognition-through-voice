@@ -50,7 +50,7 @@ uvicorn app.main:app --reload --port 8000
 - Health check: <http://localhost:8000/health>
 - Interactive docs: <http://localhost:8000/docs>
 
-The API starts even when PostgreSQL or the trained model is missing; `/health` then reports `"status": "degraded"` with `database` / `model_loaded` telling you which is absent.
+The API starts even when PostgreSQL or the trained model is missing; `/health` then answers **HTTP 503** with `"status": "degraded"` and `database` / `model_loaded` telling you which is absent (HTTP 200 with `"status": "ok"` when both are available). `/health/live` always returns 200 while the process is up, for plain liveness probes.
 
 ## Application setup (`app/main.py`)
 
@@ -59,7 +59,10 @@ The API starts even when PostgreSQL or the trained model is missing; `/health` t
 - Request logging records method, path, status and time for every request; `/auth/login`, `/auth/register` and `/auth/refresh` are logged without their query string and marked `[sensitive]`; bodies are never logged.
 - Errors always have the shape `{"detail": "message"}`: `HTTPException` (4xx/5xx), validation errors (422 with a readable `detail` plus `errors`; 400 on auth routes) and unhandled exceptions (500 "Internal server error", full traceback in the log).
 - Lifecycle (`lifespan`): logs the configuration with secrets masked, probes PostgreSQL and applies migrations, verifies the model artifacts exist, loads the MLP once and warms up feature extraction; on shutdown it releases the model, disposes the connection pool and removes leftover upload temp files.
-- Health: `GET /health` (no auth) returns `status` (`ok` when database and model are available, otherwise `degraded`), `version` and `timestamp`; `GET /` returns API information.
+- Health: `GET /health` (no auth) is the readiness probe: 200 with `status: ok` when database and model are available, otherwise 503 with `status: degraded` and the same body; `GET /health/live` is the liveness probe (always 200); `GET /` returns API information.
+- Uploads are stored locally by default (only the original filename is recorded). S3 storage requires `S3_ENABLED=true` **and** `S3_BUCKET_NAME`; placeholder values are rejected, and a bucket name alone never enables uploads.
+- Secrets: with `ENVIRONMENT=production` the API refuses to start when `JWT_SECRET_KEY` is the default, an example value from the `.env.example` files, or a low-variety string. The check never logs the value; in development it only logs a warning.
+- Prediction routes stream the upload on the event loop and run decoding, feature extraction, inference and persistence in the worker thread pool, so other requests are served while a prediction is in progress.
 - Entry points: `uvicorn app.main:app --port 8000` or `python -m app.main` (binds 0.0.0.0:8000, no reload).
 
 ## Tests and lint

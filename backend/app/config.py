@@ -11,6 +11,49 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 _INSECURE_JWT_DEFAULT = "change-me-in-production-use-a-long-random-string"
 
+#: Substrings that identify example / placeholder secrets (compared case-insensitively).
+_PLACEHOLDER_MARKERS = (
+    "change-me",
+    "changeme",
+    "replace-with",
+    "replace_with",
+    "your_secret",
+    "your-secret",
+    "your_password",
+    "your_access_key",
+    "your_secret_key",
+    "example",
+    "placeholder",
+    "dummy",
+    "insecure",
+)
+#: Example values shipped in the .env.example files and docs; never valid in production.
+_KNOWN_PLACEHOLDER_SECRETS = frozenset(
+    {
+        _INSECURE_JWT_DEFAULT,
+        "replace-with-a-long-random-string-of-32-plus-chars",
+        "your_secret_key_at_least_32_chars",
+        "gender-voice-bucket",
+        "your_access_key",
+        "your_secret_key",
+        "your_password",
+    }
+)
+_MIN_DISTINCT_SECRET_CHARS = 8
+
+
+def looks_like_placeholder(value: str | None) -> bool:
+    """True for empty values, known example values or values carrying an example marker."""
+    if not value:
+        return False
+    lowered = value.strip().lower()
+    return lowered in _KNOWN_PLACEHOLDER_SECRETS or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+
+
+def is_weak_secret(value: str) -> bool:
+    """Short, placeholder-like or low-variety secrets (e.g. one repeated character)."""
+    return len(value) < 32 or looks_like_placeholder(value) or len(set(value)) < _MIN_DISTINCT_SECRET_CHARS
+
 
 class Settings(BaseSettings):
     """Typed settings. Values come from the environment, then `.env`, then defaults."""
@@ -41,6 +84,9 @@ class Settings(BaseSettings):
     AWS_ACCESS_KEY_ID: str | None = None
     AWS_SECRET_ACCESS_KEY: str | None = None
     AWS_REGION: str = "us-east-1"
+    # S3 storage of uploads is OFF unless S3_ENABLED is true AND a bucket is configured.
+    # A bucket name alone (e.g. the example value) never enables uploads.
+    S3_ENABLED: bool = False
     S3_BUCKET_NAME: str | None = None
 
     # --- Auth (JWT) ---
@@ -90,6 +136,15 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
 
+    @property
+    def jwt_secret_is_weak(self) -> bool:
+        """True when the JWT secret is the default, an example value or low-variety (never logs it)."""
+        return is_weak_secret(self.JWT_SECRET_KEY)
+
+    @property
+    def s3_storage_enabled(self) -> bool:
+        return bool(self.S3_ENABLED and self.S3_BUCKET_NAME)
+
     @field_validator("LOG_LEVEL", mode="before")
     @classmethod
     def _upper_log_level(cls, value: str) -> str:
@@ -102,10 +157,28 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET_KEY must be at least 32 characters long")
         return value
 
+    @field_validator("S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", mode="before")
+    @classmethod
+    def _blank_placeholders(cls, value: str | None) -> str | None:
+        """Treat empty strings as unset (the .env.example files leave these blank)."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @model_validator(mode="after")
-    def _guard_production_secrets(self) -> "Settings":
-        if self.is_production and self.JWT_SECRET_KEY == _INSECURE_JWT_DEFAULT:
-            raise ValueError("JWT_SECRET_KEY must be set to a strong value when ENVIRONMENT=production")
+    def _guard_secrets(self) -> "Settings":
+        # Error messages deliberately never include the offending value.
+        if self.is_production and self.jwt_secret_is_weak:
+            raise ValueError(
+                "JWT_SECRET_KEY is the default, an example value or too predictable; set a random secret "
+                "of at least 32 characters when ENVIRONMENT=production"
+            )
+        if self.S3_ENABLED:
+            if not self.S3_BUCKET_NAME:
+                raise ValueError("S3_ENABLED=true requires S3_BUCKET_NAME")
+            for name in ("S3_BUCKET_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+                if looks_like_placeholder(getattr(self, name)):
+                    raise ValueError(f"{name} is an example value; S3 cannot be enabled with it")
         return self
 
 

@@ -685,3 +685,52 @@ def test_sample_audio_fixture(test_audio_file: bytes) -> None:
     assert np.max(np.abs(samples)) == pytest.approx(sample_spec.PEAK, abs=0.01)
     # The committed file must be exactly what the generator produces (deterministic seed)
     assert np.allclose(samples, sample_spec.synthesize(), atol=1.0 / 32768)
+
+
+# ---------------------------------------------------------------------------
+# 7. Event loop stays responsive during a prediction (Phase 6A)
+# ---------------------------------------------------------------------------
+
+
+def test_prediction_work_does_not_block_other_requests(
+    test_client: TestClient, valid_token: str, test_audio_file: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A slow decode/inference must run off the event loop so a concurrent /health answers promptly.
+
+    Before the fix the prediction route executed decoding, feature extraction and inference on the
+    event loop itself, which stalled every other request for the duration of the prediction.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.api import predictions as predictions_module
+
+    real_decode = predictions_module.load_and_prepare_audio
+    started = threading.Event()
+
+    def slow_decode(path):
+        started.set()
+        time.sleep(1.5)  # simulates a slow CPU-bound decode in the worker
+        return real_decode(path)
+
+    monkeypatch.setattr(predictions_module, "load_and_prepare_audio", slow_decode)
+
+    def predict():
+        return _upload(test_client, valid_token, "sample_audio.wav", test_audio_file)
+
+    def probe():
+        assert started.wait(5), "prediction never started"
+        t0 = time.perf_counter()
+        r = test_client.get("/health/live")
+        return r.status_code, time.perf_counter() - t0
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        prediction_future = pool.submit(predict)
+        probe_future = pool.submit(probe)
+        status_code, latency = probe_future.result(timeout=10)
+        prediction = prediction_future.result(timeout=30)
+
+    assert status_code == 200
+    assert latency < 1.0, f"/health/live took {latency:.2f}s while a prediction was running"
+    assert prediction.status_code == 200, prediction.text
+    assert prediction.json()["prediction_id"] is not None

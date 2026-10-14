@@ -4,7 +4,7 @@ Next.js 14 (App Router, TypeScript, Tailwind CSS) client for Gender Recognition 
 
 ## Setup
 
-Requires Node.js 18.17 or newer (Node 22 is used for development).
+Requires Node.js 18.17 or newer to build and run; `npm test` needs Node 22.18 or newer (Node 22 is used for development and in CI).
 
 ```bash
 cd frontend
@@ -20,8 +20,14 @@ npm run build        # production build (.next/standalone is used by the Docker 
 npm run start        # serve the production build
 npm run lint         # ESLint (next/core-web-vitals + next/typescript)
 npm run type-check   # tsc --noEmit
-npm run check        # lint + type-check
+npm test             # unit tests in __tests__/ (Node's built-in test runner, no extra dependency)
+npm run check        # lint + type-check + test
 ```
+
+Unit tests use `node --test` with Node's native TypeScript type stripping (Node 22.18+), so test
+files import source modules with explicit `.ts` extensions (`allowImportingTsExtensions` is enabled
+in `tsconfig.json`). They cover pure helpers only (for example `lib/audio.ts`); browser-dependent
+code is verified manually or in the end-to-end phase.
 
 The backend must allow this origin in its `CORS_ORIGINS` setting (default `http://localhost:3000`).
 
@@ -91,7 +97,7 @@ frontend/
 ├── styles/
 │   ├── variables.css          CSS custom properties (light/dark tokens, gender colours)
 │   └── globals.css            Tailwind layers, component classes (.card, .btn-primary, .badge-male ...)
-├── __tests__/                 Unit tests (runner configured in the testing phase)
+├── __tests__/                 Unit tests (`npm test`, Node's built-in runner; pure helpers only)
 ├── cypress/e2e/               End-to-end tests (configured in the testing phase)
 ├── tailwind.config.js         Custom theme: male (blue) / female (pink) / brand palettes, type scale, spacing
 ├── next.config.js             Standalone output, image optimisation, security headers
@@ -131,7 +137,7 @@ usePredictionStore.getState().reset();
 - Start (red, pulsing while recording), Stop (only while recording), Play/Pause and Clear after a take; timer in `mm:ss.t` updated every 100 ms; live green waveform from an `AnalyserNode` on a canvas, static peaks afterwards.
 - Limits: shorter than `minDuration` (1 s) is rejected with an error, `maxDuration` (10 s) stops the recording automatically, with warnings as the limits approach.
 - Errors: permission denied, no microphone, unsupported browser, recording failure.
-- Output: the take is decoded with Web Audio and re-encoded as **16 kHz mono 16-bit WAV** (`lib/audio.ts`) before `onRecordingComplete(blob)` is called, because the backend decodes with libsndfile and cannot read WebM/Opus.
+- Output: the take is decoded with Web Audio, **trimmed to `maxDuration` on the decoded samples** (the auto-stop fires on a timer tick, so the raw take can run slightly over, and the backend rejects anything above its limit) and re-encoded as **16 kHz mono 16-bit WAV** (`lib/audio.ts`) before `onRecordingComplete(blob)` is called, because the backend decodes with libsndfile and cannot read WebM/Opus.
 - Accessibility: ARIA labels on all controls, a polite live region for timer and status, Space toggles recording while the recorder has focus.
 
 ```tsx
