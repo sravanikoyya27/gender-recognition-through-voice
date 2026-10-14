@@ -6,9 +6,11 @@ import secrets
 
 import pytest
 
-from app.config import Settings, is_weak_secret, looks_like_placeholder
+from app.config import _INSECURE_JWT_DEFAULT, Settings, is_weak_secret, looks_like_placeholder
 
 STRONG = secrets.token_urlsafe(48)
+# Tests pass the secret explicitly: a JWT_SECRET_KEY in the environment (CI, a developer .env)
+# would otherwise override the built-in default and change what is being tested.
 
 PLACEHOLDERS = [
     "change-me-in-production-use-a-long-random-string",  # built-in default
@@ -44,8 +46,9 @@ def test_production_refuses_placeholder_secrets_without_logging_them(value: str)
 
 
 def test_development_allows_placeholder_but_flags_it() -> None:
-    settings = Settings(ENVIRONMENT="development")  # built-in default secret
+    settings = Settings(ENVIRONMENT="development", JWT_SECRET_KEY=_INSECURE_JWT_DEFAULT)
     assert settings.jwt_secret_is_weak is True
+    assert Settings(ENVIRONMENT="development", JWT_SECRET_KEY=STRONG).jwt_secret_is_weak is False
 
 
 def test_short_secret_is_rejected_everywhere() -> None:
@@ -56,7 +59,7 @@ def test_short_secret_is_rejected_everywhere() -> None:
 def test_startup_warns_about_weak_secret_without_printing_it(caplog: pytest.LogCaptureFixture) -> None:
     from app.main import _log_configuration
 
-    settings = Settings(ENVIRONMENT="development")
+    settings = Settings(ENVIRONMENT="development", JWT_SECRET_KEY=_INSECURE_JWT_DEFAULT)
     with caplog.at_level("WARNING", logger="app"):
         _log_configuration(settings)
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
