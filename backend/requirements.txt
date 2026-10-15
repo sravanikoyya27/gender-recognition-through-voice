@@ -4,13 +4,13 @@
 # --- Web framework ---
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+python-multipart==0.0.32
 
 # --- Shared feature extraction (same code as ML training; see docs/acoustic_features.md) ---
 -e ../ml_models
 
 # --- Audio / numerical / ML ---
-setuptools==69.5.1        # librosa 0.10.0 imports pkg_resources; not present in uv-created venvs
+setuptools==81.0.0        # newest release that still ships pkg_resources (librosa 0.10.0 imports it); 82+ removed it
 librosa==0.10.0
 numpy==1.24.3
 pandas==2.1.1
@@ -19,18 +19,18 @@ tensorflow==2.14.0
 scipy==1.11.3
 
 # --- Configuration ---
-python-dotenv==1.0.0
-pydantic==2.4.2
-pydantic-settings==2.0.3
+python-dotenv==1.2.4
+pydantic==2.14.1
+pydantic-settings==2.16.0
 email-validator==2.1.0.post1   # required by pydantic's EmailStr (equivalent to pydantic[email])
 
 # --- Database ---
 sqlalchemy==2.0.23
-psycopg2-binary==2.9.9
-alembic==1.12.1
+psycopg2-binary==2.9.13
+alembic==1.20.0
 
 # --- Auth ---
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1            # passlib 1.7.4 is incompatible with bcrypt >= 4.1
 
@@ -38,7 +38,14 @@ bcrypt==4.0.1            # passlib 1.7.4 is incompatible with bcrypt >= 4.1
 redis==5.0.1
 
 # --- AWS ---
-boto3==1.28.85            # spec asked for 1.28.86, which was never published; 1.28.85 is the last 1.28.x
+boto3==1.43.114
+
+# --- Security pins for transitive dependencies (Phase 6B group 2) ---
+urllib3==2.8.0
+werkzeug==3.1.9
+mako==1.4.2
+oauthlib==4.0.0
+cryptography==50.0.2
 
 # --- Testing ---
 pytest==7.4.3
