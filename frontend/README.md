@@ -41,8 +41,8 @@ The backend must allow this origin in its `CORS_ORIGINS` setting (default `http:
 | recharts | 2.10.0 | Charts |
 | lucide-react | 0.292.0 | Icons |
 | clsx | 2.0.0 | Class-name utility |
-| next-auth | 4.24.5 | Optional server-side auth (not wired yet) |
-| react-mic | 12.4.6 | Audio recording. 12.7.2 was requested but was never published; 12.4.6 is the last release. It declares a React 16 peer and is installed with `--legacy-peer-deps`. |
+
+`next-auth` and `react-mic` were part of the original specification but were never used by the code (authentication is the backend's JWT API and the recorder is the native MediaRecorder); both were removed in Phase 6B, which also removed the need for `npm install --legacy-peer-deps`.
 
 ## Directory structure
 
@@ -90,8 +90,7 @@ frontend/
 │   └── analyticsStore.ts      analytics filters (persisted), sort/page, cached responses (1 h)
 ├── types/
 │   ├── api.ts                 wire types mirroring backend/app/schemas
-│   ├── models.ts              domain types, FEATURE_NAMES
-│   └── react-mic.d.ts         minimal typings for react-mic
+│   └── models.ts              domain types, FEATURE_NAMES
 ├── lib/utils.ts               cn(), formatPercent(), formatBytes()
 ├── lib/analytics.ts           date windows, timeline/confidence bucketing, formatting for the analytics page
 ├── styles/
@@ -132,7 +131,7 @@ usePredictionStore.getState().reset();
 
 ## Audio recorder
 
-`components/AudioRecorder.tsx` records with the native `MediaRecorder` API (react-mic is installed but not used: it is unmaintained, targets React 16 and bundles analytics). State lives in `store/recorderStore.ts` (`isRecording`, `recordingTime`, `audioBlob`, `isPlaying`, `error`, `warning`, `permission`), the mechanics in `hooks/useAudioRecorder.ts`:
+`components/AudioRecorder.tsx` records with the native `MediaRecorder` API (the `react-mic` package named in the original specification is unmaintained, targets React 16 and bundles analytics, so it is not used and no longer installed). State lives in `store/recorderStore.ts` (`isRecording`, `recordingTime`, `audioBlob`, `isPlaying`, `error`, `warning`, `permission`), the mechanics in `hooks/useAudioRecorder.ts`:
 
 - Start (red, pulsing while recording), Stop (only while recording), Play/Pause and Clear after a take; timer in `mm:ss.t` updated every 100 ms; live green waveform from an `AnalyserNode` on a canvas, static peaks afterwards.
 - Limits: shorter than `minDuration` (1 s) is rejected with an error, `maxDuration` (10 s) stops the recording automatically, with warnings as the limits approach.

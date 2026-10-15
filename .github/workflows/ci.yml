@@ -146,7 +146,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Clean install
-        run: npm ci --legacy-peer-deps # react-mic 12.4.6 declares a React 16 peer
+        run: npm ci
 
       - name: ESLint
         run: npm run lint
