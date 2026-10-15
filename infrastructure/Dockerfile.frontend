@@ -14,9 +14,8 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Dependencies first (cached unless package.json / package-lock.json change).
-# --legacy-peer-deps: react-mic 12.4.6 declares a React 16 peer (see frontend/README.md).
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --legacy-peer-deps
+RUN npm ci
 
 COPY frontend/ ./
 
