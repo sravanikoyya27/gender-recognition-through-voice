@@ -75,7 +75,13 @@ browser cannot resolve service names, so the public URL stays `http://localhost:
 
 Start-up order is enforced with health checks: `backend` waits for `postgres` and `redis` to be
 healthy, `frontend` waits for `backend`'s `/health` (the model takes tens of seconds to load;
-the backend health check allows a 120 s start period).
+the backend health check allows a 120 s start period). `/health` returns 503 while the database
+is unreachable or the model is not loaded, so a degraded backend shows as **unhealthy** in
+`docker compose ps`; `/health/live` is the plain liveness endpoint.
+
+S3 upload storage is off by default: it needs `S3_ENABLED=true` and a real `S3_BUCKET_NAME` in
+`.env` (placeholder values are rejected at startup). Local storage keeps only the original
+filename on the prediction row.
 
 ## Volumes
 

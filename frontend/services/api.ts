@@ -71,8 +71,11 @@ export function isApiError(value: unknown): value is ApiError {
 
 // --- Endpoints ---------------------------------------------------------------
 
+/** Readiness check: 200 when healthy, 503 with the same body when degraded (both resolve here). */
 export async function getHealth(): Promise<HealthResponse> {
-  const { data } = await api.get<HealthResponse>("/health");
+  const { data } = await api.get<HealthResponse>("/health", {
+    validateStatus: (code) => code === 200 || code === 503,
+  });
   return data;
 }
 
