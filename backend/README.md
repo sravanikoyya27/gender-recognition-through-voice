@@ -24,7 +24,7 @@ backend/
 
 ## Python version
 
-The pinned stack (TensorFlow 2.14, NumPy 1.24) requires **Python 3.10 or 3.11**. If your default interpreter is newer, create the virtualenv with a 3.11 toolchain. The quickest route on any OS is [uv](https://docs.astral.sh/uv/):
+The pinned stack requires **Python 3.11** (Starlette 1.x needs 3.11 or newer; TensorFlow 2.14 and NumPy 1.24 ship no wheels for 3.12+). If your default interpreter is different, create the virtualenv with a 3.11 toolchain. The quickest route on any OS is [uv](https://docs.astral.sh/uv/):
 
 ```bash
 pip install uv
