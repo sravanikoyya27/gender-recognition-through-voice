@@ -54,7 +54,7 @@ The commands below describe the intended developer workflow. Individual steps be
 git clone <repository-url>
 cd Gender_recognition_through_voice
 
-# 2. Backend (FastAPI)  -- requires Python 3.10 or 3.11, see backend/README.md
+# 2. Backend (FastAPI)  -- requires Python 3.11, see backend/README.md
 cd backend
 py -3.11 -m venv .venv          # or: uv venv .venv --python 3.11
 .venv\Scripts\activate          # Windows   |   source .venv/bin/activate on Linux/macOS
